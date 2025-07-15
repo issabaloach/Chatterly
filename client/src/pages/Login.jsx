@@ -2,29 +2,22 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Form, Input, Button, Typography, Divider, Checkbox, message } from "antd";
 import { LockOutlined, MailOutlined, GoogleOutlined, AppleFilled, FacebookFilled } from "@ant-design/icons";
-import API from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 
 const { Title, Text } = Typography;
 
-const Login = ({ setIsAuthenticated }) => {
+const Login = () => {
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
-  const navigate = useNavigate();
+  const { login } = useAuth();
 
   const handleLogin = async (values) => {
     setLoading(true);
     try {
-      const res = await API.post("/auth/login", values);
-      // Save token
-      localStorage.setItem("token", res.data.token);
-      // Update auth state
-      setIsAuthenticated(true);
+      await login(values.email, values.password);
       message.success("Login successful!");
-      // Redirect to chat
-      navigate("/");
     } catch (err) {
-      message.error(err.response?.data?.message || "Login failed. Please try again.");
-      console.error("Login failed", err.response?.data);
+      message.error(err?.response?.data?.message || "Login failed. Please try again.");
     } finally {
       setLoading(false);
     }

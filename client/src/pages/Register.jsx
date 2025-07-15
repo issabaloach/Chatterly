@@ -2,26 +2,22 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Form, Input, Button, Typography, Divider, message } from "antd";
 import { UserOutlined, LockOutlined, MailOutlined, GoogleOutlined, AppleFilled, FacebookFilled } from "@ant-design/icons";
-import API from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 
 const { Title, Text } = Typography;
 
 const Register = () => {
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
+  const { register } = useAuth();
 
   const handleRegister = async (values) => {
     setLoading(true);
     try {
-      const res = await API.post("/auth/register", values);
-      message.success("Registration successful!");
-      console.log("Registration successful", res.data);
-      // Save token/user & redirect
-      // Example: localStorage.setItem("token", res.data.token);
-      // Example: navigate("/chat");
+      await register(values.name, values.email, values.password);
+      message.success("Registration successful! Please log in.");
     } catch (err) {
-      message.error(err.response?.data?.message || "Registration failed. Please try again.");
-      console.error("Registration failed", err.response?.data);
+      message.error(err?.response?.data?.message || "Registration failed. Please try again.");
     } finally {
       setLoading(false);
     }

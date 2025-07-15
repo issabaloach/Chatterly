@@ -1,33 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import {
-  Input, Button, Avatar, Badge, Typography, Divider, Empty, Tooltip, Drawer, Modal, Dropdown
+  Input, Button, Avatar, Badge, Typography, Divider, Empty, Tooltip, Drawer, Modal, Dropdown, message
 } from "antd";
 import {
   SendOutlined, MenuOutlined, PhoneOutlined, VideoCameraOutlined, SmileOutlined,
   PaperClipOutlined, CloseOutlined, LogoutOutlined, UserOutlined, SettingOutlined, QuestionCircleOutlined
 } from "@ant-design/icons";
+import { useAuth } from "../context/AuthContext";
+import api from "../utils/api";
 
 const { Text, Title } = Typography;
-const socket = io(import.meta.env.VITE_API_BASE_URL); // Replace with your backend URL
 
 const Chat = () => {
-  const [users, setUsers] = useState([
-    { id: 1, name: "Alice Smith", avatar: "A", status: "online", lastSeen: "Just now" },
-    { id: 2, name: "Bob Johnson", avatar: "B", status: "online", lastSeen: "5m ago" },
-    { id: 3, name: "Charlie Davis", avatar: "C", status: "offline", lastSeen: "2h ago" },
-    { id: 4, name: "Diana Wilson", avatar: "D", status: "online", lastSeen: "Just now" },
-    { id: 5, name: "Edward Brown", avatar: "E", status: "offline", lastSeen: "1d ago" },
-  ]);
-
-  const [selectedUser, setSelectedUser] = useState(users[0]);
-  const [messages, setMessages] = useState([
-    { sender: "Alice Smith", receiver: "You", text: "Hey there! How's it going?", timestamp: new Date(Date.now() - 60000 * 30) },
-    { sender: "You", receiver: "Alice Smith", text: "I'm good! Just working on this new project.", timestamp: new Date(Date.now() - 60000 * 25) },
-    { sender: "Alice Smith", receiver: "You", text: "That sounds exciting! What are you building?", timestamp: new Date(Date.now() - 60000 * 20) },
-    { sender: "You", receiver: "Alice Smith", text: "A chat application with React, Ant Design, and Tailwind CSS!", timestamp: new Date(Date.now() - 60000 * 15) },
-  ]);
-
+  const { user, logout, token } = useAuth();
+  const [users, setUsers] = useState([]);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [messages, setMessages] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [newMsg, setNewMsg] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -35,14 +24,40 @@ const Chat = () => {
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
   const chatContainerRef = useRef(null);
+  const [socket, setSocket] = useState(null);
 
+  // Fetch users (for demo, just current user)
   useEffect(() => {
-    socket.on("receiveMessage", (msg) => {
+    setUsers([{ id: user?.id, name: user?.username, avatar: user?.username?.[0]?.toUpperCase() || "U", status: "online", lastSeen: "Just now" }]);
+    setSelectedUser({ id: user?.id, name: user?.username, avatar: user?.username?.[0]?.toUpperCase() || "U", status: "online", lastSeen: "Just now" });
+  }, [user]);
+
+  // Fetch messages from backend
+  useEffect(() => {
+    const fetchMessages = async () => {
+      try {
+        const res = await api.get("/chat/messages");
+        setMessages(res.data);
+      } catch (err) {
+        message.error("Failed to load messages");
+      }
+    };
+    fetchMessages();
+  }, []);
+
+  // Setup socket.io connection
+  useEffect(() => {
+    if (!token) return;
+    const s = io("/", {
+      auth: { token },
+      transports: ["websocket"]
+    });
+    setSocket(s);
+    s.on("receiveMessage", (msg) => {
       setMessages((prev) => [...prev, msg]);
     });
-
-    return () => socket.off("receiveMessage");
-  }, []);
+    return () => s.disconnect();
+  }, [token]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -59,36 +74,35 @@ const Chat = () => {
         setSidebarOpen(false);
       }
     };
-
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const sendMessage = (e) => {
+  const sendMessage = async (e) => {
     e.preventDefault();
     if (!newMsg.trim()) return;
-
     const msgData = {
-      sender: "You",
-      receiver: selectedUser.name,
-      text: newMsg,
-      timestamp: new Date(),
+      sender: user.username,
+      content: newMsg,
+      createdAt: new Date(),
     };
-
-    socket.emit("sendMessage", msgData);
-    setMessages((prev) => [...prev, msgData]);
-    setNewMsg("");
+    try {
+      // Save to backend
+      await api.post("/chat/messages", { content: newMsg });
+      // Emit to socket
+      socket.emit("sendMessage", msgData);
+      setMessages((prev) => [...prev, msgData]);
+      setNewMsg("");
+    } catch (err) {
+      message.error("Failed to send message");
+    }
   };
 
-  const filteredUsers = users.filter(user =>
-    user.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredUsers = users.filter(u => u.name?.toLowerCase().includes(searchTerm.toLowerCase()));
 
   const groupedMessages = messages.reduce((groups, message) => {
-    const date = new Date(message.timestamp).toLocaleDateString();
-    if (!groups[date]) {
-      groups[date] = [];
-    }
+    const date = new Date(message.createdAt || message.timestamp).toLocaleDateString();
+    if (!groups[date]) groups[date] = [];
     groups[date].push(message);
     return groups;
   }, {});
@@ -109,9 +123,7 @@ const Chat = () => {
       label: 'Help',
       icon: <QuestionCircleOutlined />,
     },
-    {
-      type: 'divider',
-    },
+    { type: 'divider' },
     {
       key: '4',
       label: 'Logout',
@@ -125,11 +137,10 @@ const Chat = () => {
       <header className="p-4 flex items-center justify-between border-b border-gray-100">
         <Title level={4} className="m-0 text-blue-600">Chatterly</Title>
         <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
-          <Avatar className="cursor-pointer bg-blue-500">U</Avatar>
+          <Avatar className="cursor-pointer bg-blue-500">{user?.username?.[0]?.toUpperCase() || "U"}</Avatar>
         </Dropdown>
         <Button className="md:hidden ml-2" type="text" icon={<CloseOutlined />} onClick={() => setSidebarOpen(false)} />
       </header>
-
       <div className="p-3">
         <Input
           placeholder="Search conversations..."
@@ -139,24 +150,22 @@ const Chat = () => {
           className="rounded-full bg-gray-100 border-none hover:bg-gray-200 transition"
         />
       </div>
-
       <Divider className="my-1" />
-
       <ul className="flex-1 overflow-y-auto px-2 py-1">
-        {filteredUsers.length > 0 ? filteredUsers.map((user) => (
+        {filteredUsers.length > 0 ? filteredUsers.map((u) => (
           <li
-            key={user.id}
-            onClick={() => setSelectedUser(user)}
-            className={`flex items-center p-3 mb-1 rounded-lg cursor-pointer transition ${selectedUser.id === user.id ? "bg-blue-50 text-blue-600" : "hover:bg-gray-100"}`}
+            key={u.id}
+            onClick={() => setSelectedUser(u)}
+            className={`flex items-center p-3 mb-1 rounded-lg cursor-pointer transition ${selectedUser?.id === u.id ? "bg-blue-50 text-blue-600" : "hover:bg-gray-100"}`}
           >
-            <Badge dot status={user.status === "online" ? "success" : "default"} offset={[-2, 32]}>
+            <Badge dot status={u.status === "online" ? "success" : "default"} offset={[-2, 32]}>
               <Avatar className="mr-3 flex items-center justify-center bg-blue-500" size="large">
-                {user.avatar}
+                {u.avatar}
               </Avatar>
             </Badge>
             <div className="flex-1 min-w-0">
-              <Text strong className="block text-sm">{user.name}</Text>
-              <Text className="text-xs text-gray-500 truncate block">{user.lastSeen}</Text>
+              <Text strong className="block text-sm">{u.name}</Text>
+              <Text className="text-xs text-gray-500 truncate block">{u.lastSeen}</Text>
             </div>
           </li>
         )) : (
@@ -172,7 +181,6 @@ const Chat = () => {
       <aside className="hidden md:flex md:w-80 lg:w-96 bg-white border-r border-gray-200 flex-col">
         {sidebarContent}
       </aside>
-
       <Drawer
         placement="left"
         closable={false}
@@ -186,18 +194,17 @@ const Chat = () => {
           {sidebarContent}
         </div>
       </Drawer>
-
       {/* Chat Window */}
       <main className="flex-1 flex flex-col w-full h-full">
         <header className="bg-white shadow-sm px-4 py-3 flex items-center justify-between">
           <div className="flex items-center">
             <Button className="mr-3 md:hidden" type="text" icon={<MenuOutlined />} onClick={() => setSidebarOpen(true)} />
-            <Badge dot status={selectedUser.status === "online" ? "success" : "default"} offset={[-2, 32]}>
-              <Avatar className="bg-blue-500">{selectedUser.avatar}</Avatar>
+            <Badge dot status={selectedUser?.status === "online" ? "success" : "default"} offset={[-2, 32]}>
+              <Avatar className="bg-blue-500">{selectedUser?.avatar}</Avatar>
             </Badge>
             <div className="ml-3">
-              <Text strong>{selectedUser.name}</Text>
-              <Text className="text-xs text-gray-500 block">{selectedUser.status === "online" ? "Online" : selectedUser.lastSeen}</Text>
+              <Text strong>{selectedUser?.name}</Text>
+              <Text className="text-xs text-gray-500 block">{selectedUser?.status === "online" ? "Online" : selectedUser?.lastSeen}</Text>
             </div>
           </div>
           <div className="flex gap-1 sm:gap-2">
@@ -210,7 +217,6 @@ const Chat = () => {
             </Tooltip>
           </div>
         </header>
-
         <section ref={chatContainerRef} className="flex-1 p-3 sm:p-4 overflow-y-auto">
           {Object.entries(groupedMessages).map(([date, msgs]) => (
             <div key={date} className="space-y-2 sm:space-y-3 mb-4">
@@ -220,14 +226,14 @@ const Chat = () => {
                 </Text>
               </div>
               {msgs.map((msg, idx) => (
-                <div key={idx} className={`flex ${msg.sender === "You" ? "justify-end" : "justify-start"}`}>
-                  {msg.sender !== "You" && (
-                    <Avatar size="small" className="mr-2 mt-1 bg-blue-500 hidden sm:block">{selectedUser.avatar}</Avatar>
+                <div key={idx} className={`flex ${msg.sender === user?.username ? "justify-end" : "justify-start"}`}>
+                  {msg.sender !== user?.username && (
+                    <Avatar size="small" className="mr-2 mt-1 bg-blue-500 hidden sm:block">{selectedUser?.avatar}</Avatar>
                   )}
-                  <div className={`max-w-xs sm:max-w-sm md:max-w-md p-2 sm:p-3 rounded-xl text-sm shadow ${msg.sender === "You" ? "bg-blue-500 text-white rounded-br-none" : "bg-white text-gray-800 rounded-bl-none"}`} style={{ wordBreak: "break-word" }}>
-                    <p className="whitespace-pre-wrap">{msg.text}</p>
+                  <div className={`max-w-xs sm:max-w-sm md:max-w-md p-2 sm:p-3 rounded-xl text-sm shadow ${msg.sender === user?.username ? "bg-blue-500 text-white rounded-br-none" : "bg-white text-gray-800 rounded-bl-none"}`} style={{ wordBreak: "break-word" }}>
+                    <p className="whitespace-pre-wrap">{msg.content || msg.text}</p>
                     <div className="text-xs mt-1 opacity-70 text-right">
-                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {new Date(msg.createdAt || msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </div>
                   </div>
                 </div>
@@ -236,7 +242,6 @@ const Chat = () => {
           ))}
           <div ref={bottomRef}></div>
         </section>
-
         <form onSubmit={sendMessage} className="bg-white border-t px-2 sm:px-4 py-2 sm:py-3 flex items-center gap-1 sm:gap-2">
           <Tooltip title="Attach file"><Button type="text" icon={<PaperClipOutlined />} shape="circle" className="hidden sm:flex" /></Tooltip>
           <Input
@@ -254,16 +259,15 @@ const Chat = () => {
           <Button type="primary" shape="circle" icon={<SendOutlined />} onClick={sendMessage} className="bg-blue-500 hover:bg-blue-600" />
         </form>
       </main>
-
       <Modal
         title="Log Out"
         open={logoutModalVisible}
-        onOk={() => setLogoutModalVisible(false)}
+        onOk={logout}
         onCancel={() => setLogoutModalVisible(false)}
         okText="Yes"
         cancelText="No"
       >
-        <p>This is just a demo. Add auth later!</p>
+        <p>Are you sure you want to log out?</p>
       </Modal>
     </div>
   );
