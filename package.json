@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "antd": "^5.26.5",
+    "git-filter-repo": "^0.0.30"
+  }
+}
